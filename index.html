@@ -1,90 +1,251 @@
-<!doctype html>
-<html lang="fr">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<meta name="theme-color" content="#0b1020" />
-<link rel="manifest" href="manifest.webmanifest" />
-<title>Parle+ Mini</title>
-<style>
-  :root{--bg:#0b1020;--card:#141a2e;--line:#1e2746;--text:#e8eefc;--muted:#9fb3d9;--accent:#7aa2ff}
-  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Inter,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#0b1020,#10152a);color:var(--text)}
-  .wrap{max-width:840px;margin:32px auto;padding:0 16px}
-  h1{font-size:20px;margin:0 0 8px} p{margin:0 0 14px;color:var(--muted)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 14px 12px;box-shadow:0 8px 22px rgba(0,0,0,.25);margin-bottom:14px}
-  label{font-size:12px;color:var(--muted)} select,button,textarea,input[type='number'],input[type='range']{border-radius:12px;border:1px solid var(--line);background:#0e1430;color:var(--text)}
-  select,button{padding:10px 12px;font-weight:600} button{cursor:pointer}
-  button.primary{background:linear-gradient(180deg,#3f67ff,#2a4de7);border-color:#3a56d9}
-  button.ghost{background:transparent}
-  .prompt{font-size:18px;line-height:1.4;border:1px dashed var(--line);border-radius:14px;padding:12px;background:#0b1226;margin:8px 0}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  textarea{width:100%;min-height:130px;padding:12px;resize:vertical}
-  .hint{color:var(--muted);font-size:12px}
-  .coach{padding:10px;border-radius:12px;background:#0b1226;border:1px solid #25305a}
-  .coach b{color:#cfe0ff}
-  .q{margin:6px 0 0 0}
-  .spacer{flex:1}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <h1>Parle+ Mini</h1>
-  <p>Pratique orale du français avec un <b>mode Coach</b> léger. Appuyez sur Démarrer une fois, parlez librement ; le coach relance automatiquement après un court silence.</p>
-
-  <div class="card">
-    <div class="row">
-      <label>Niveau</label>
-      <select id="level">
-        <option value="any">Tous</option>
-        <option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option>
-      </select>
-      <label>Thème</label>
-      <select id="category">
-        <option value="any">Tous</option>
-        <option>At home</option><option>Supermarket</option><option>Travel</option>
-        <option>Work</option><option>Small talk</option>
-      </select>
-      <button id="new" class="primary">Nouveau sujet (R)</button>
-      <button id="say" class="ghost">🔊 Lire</button>
-      <span class="hint">Astuce : R = nouveau sujet</span>
-    </div>
-    <div id="prompt" class="prompt">Cliquez sur « Nouveau sujet » pour commencer.</div>
-  </div>
-
-  <div class="card">
-    <div class="row">
-      <button id="start" class="primary">Démarrer (Espace)</button>
-      <button id="stop" class="ghost" disabled>Arrêter</button>
-      <span class="hint" id="status">Reconnaissance vocale : en veille</span>
-      <span class="hint" id="timer">00:00</span>
-      <div class="spacer"></div>
-      <label class="hint">Vitesse de la voix</label>
-      <input type="range" id="rate" min="0.7" max="1.3" step="0.05" value="1.0" style="width:160px">
-      <button id="repeat" class="ghost">↻ Répéter</button>
-      <button id="slow" class="ghost">🐢 Répéter lentement</button>
-    </div>
-    <label style="display:block;margin-top:8px">Transcription en direct (fr-FR)</label>
-    <textarea id="text" placeholder="Votre parole s’affiche ici…"></textarea>
-    <p class="hint">Commandes vocales : « Répète », « Plus lentement », « Parle plus doucement ».</p>
-  </div>
-
-  <div class="card">
-    <div class="row">
-      <label><input type="checkbox" id="coachOn" checked> Mode Coach</label>
-      <label>Relance après silence (s)</label>
-      <input type="number" id="silence" min="3" max="15" step="1" value="5" style="width:64px">
-      <span class="hint">Le coach posera une nouvelle question ~<b>5 s</b> après votre arrêt de parole.</span>
-    </div>
-    <div id="coach" class="coach">
-      <div><b>Assistant :</b> <span id="coachText" class="q">J’attends votre réponse…</span></div>
-    </div>
-  </div>
-
-  <p class="hint">Meilleur support : Chrome/Edge (ordinateur ou Android). Sur Firefox, la reconnaissance vocale n’est pas disponible.</p>
-</div>
-
 <script>
-  /* le script complet va ici : (identique à la version que tu avais, mais avec textes traduits) */
+  // ---- Banque de sujets (avec B2/C1) ----
+  const PROMPTS = [
+    {lvl:'A1', cat:'At home', t:"Présentez-vous en deux phrases."},
+    {lvl:'A1', cat:'Supermarket', t:"Commandez une baguette et un café à emporter."},
+    {lvl:'A1', cat:'Travel', t:"Demandez votre chemin vers un musée proche."},
+    {lvl:'A2', cat:'At home', t:"Décrivez votre matinée idéale en trois phrases."},
+    {lvl:'A2', cat:'Work', t:"Expliquez comment vous organisez votre journée de travail."},
+    {lvl:'A2', cat:'Travel', t:"Réservez une chambre d’hôtel pour deux nuits (dates, heure d’arrivée)."},
+    {lvl:'B1', cat:'Work', t:"Résumez un projet récent : objectif, obstacles, résultats."},
+    {lvl:'B1', cat:'Small talk', t:"Donnez votre avis sur le télétravail : 2 avantages, 2 risques."},
+    {lvl:'B1', cat:'Travel', t:"Expliquez un retard de train et demandez une solution."},
+    {lvl:'B2', cat:'Small talk', t:"Discutez d’une tendance tech et son impact quotidien avec un exemple."},
+    {lvl:'B2', cat:'Work', t:"Décrivez un conflit au travail et sa résolution, puis tirez une leçon."},
+    {lvl:'B2', cat:'Travel', t:"Comparez avion et train pour un trajet moyen (coût, temps, confort)."},
+    {lvl:'C1', cat:'Work', t:"Exposez votre vision du télétravail : compromis viables et limites."},
+    {lvl:'C1', cat:'Small talk', t:"Argumentez sur l’IA générative dans l’éducation avec nuances."},
+    {lvl:'C1', cat:'At home', t:"Défendez ou critiquez le minimalisme domestique avec un exemple concret."}
+  ];
+
+  // ---- Modèles de relance par thème et niveau ----
+  const TEMPLATES = {
+    generic: {
+      easy: [
+        "Pouvez-vous donner un exemple ?",
+        "Pourquoi ? Donnez une raison simple.",
+        "Qui ? Où ? Quand ?",
+        "Ajoutez une phrase de plus, s'il vous plaît."
+      ],
+      hard: [
+        "Nuancez votre réponse avec un contre-argument.",
+        "Donnez un exemple précis et une donnée chiffrée.",
+        "Quelles seraient les conséquences à moyen terme ?",
+        "Que proposeriez-vous comme amélioration concrète ?"
+      ]
+    },
+    'At home': {
+      easy: [
+        "Quelles trois choses voyez-vous autour de vous maintenant ?",
+        "Combien de temps y passez-vous chaque jour ?"
+      ],
+      hard: [
+        "Expliquez l'impact sur votre bien-être avec un exemple.",
+        "Proposez un changement et justifiez-le."
+      ]
+    },
+    'Supermarket': {
+      easy: [
+        "Demandez aussi le prix, s'il vous plaît.",
+        "Expliquez votre préférence : marque ou budget ?"
+      ],
+      hard: [
+        "Comparez deux options selon trois critères.",
+        "Proposez un plan B si le produit n'existe pas."
+      ]
+    },
+    'Travel': {
+      easy: [
+        "Demandez les horaires et la durée du trajet.",
+        "Prévoyez un plan B."
+      ],
+      hard: [
+        "Comparez avec une expérience précédente et tirez une leçon.",
+        "Évaluez les coûts et bénéfices du choix."
+      ]
+    },
+    'Work': {
+      easy: [
+        "Quel était l'objectif principal ?",
+        "Quelle a été la plus grande difficulté ?"
+      ],
+      hard: [
+        "Quels indicateurs de succès avez-vous utilisés ?",
+        "Quelle amélioration proposeriez-vous et pourquoi ?"
+      ]
+    },
+    'Small talk': {
+      easy: [
+        "Posez une question ouverte pour continuer.",
+        "Ajoutez un détail personnel."
+      ],
+      hard: [
+        "Nuancez avec un contre-exemple ou une limite.",
+        "Reliez ce sujet à une tendance plus large."
+      ]
+    }
+  };
+
+  function levelBand(lvl){
+    return ['A1','A2'].includes(lvl) ? 'easy' : 'hard';
+  }
+
+  // ---- Synthèse vocale ----
+  let lastCoach = "Très bien. Je vous écoute.";
+  function speak(text, rate){
+    lastCoach = text;
+    try{
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'fr-FR';
+      u.rate = rate || Number(document.getElementById('rate').value) || 1.0;
+      speechSynthesis.speak(u);
+    }catch(e){/* ignore */}
+    document.getElementById('coachText').textContent = text;
+  }
+  function repeat(rate){ speak(lastCoach, rate); }
+
+  function pickFollowUp(category, lvl, transcript){
+    const last = (transcript || '').split(/\n/).slice(-1)[0] || '';
+    const num = last.match(/\b(\d{1,2})(?:[:h](\d{2}))?\b/);
+    const place = last.match(/\b(paris|lyon|marseille|barcelone|madrid|rome)\b/i);
+    if (num) return `Vous avez mentionné « ${num[0]} ». Pouvez-vous préciser pourquoi ce chiffre est important ?`;
+    if (place) return `Parlez un peu plus de ${place[0]} : quel quartier, quelles impressions ?`;
+    const band = levelBand(lvl || 'B1');
+    const bankCat = (TEMPLATES[category] && TEMPLATES[category][band]) ? TEMPLATES[category][band] : [];
+    const bankGen = TEMPLATES.generic[band];
+    const bank = bankCat.concat(bankGen);
+    return bank[Math.floor(Math.random()*bank.length)] || "Pouvez-vous développer un peu ?";
+  }
+
+  // ---- Références UI ----
+  const els = {
+    level: document.getElementById('level'),
+    category: document.getElementById('category'),
+    newBtn: document.getElementById('new'),
+    say: document.getElementById('say'),
+    prompt: document.getElementById('prompt'),
+    start: document.getElementById('start'),
+    stop: document.getElementById('stop'),
+    status: document.getElementById('status'),
+    timer: document.getElementById('timer'),
+    text: document.getElementById('text'),
+    rate: document.getElementById('rate'),
+    repeat: document.getElementById('repeat'),
+    slow: document.getElementById('slow'),
+    coachOn: document.getElementById('coachOn'),
+    silence: document.getElementById('silence'),
+    coachText: document.getElementById('coachText')
+  };
+
+  const current = {prompt:null};
+
+  function pick(){
+    const lvl = els.level.value, cat = els.category.value;
+    const pool = PROMPTS.filter(p=> (lvl==='any'||p.lvl===lvl) && (cat==='any'||p.cat===cat));
+    const p = pool[Math.floor(Math.random()*pool.length)] || PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
+    current.prompt = p;
+    els.prompt.textContent = p.t;
+    if (els.coachOn.checked) speak("Très bien. Allez-y, je vous écoute.", Number(els.rate.value));
+  }
+
+  // ---- Reconnaissance vocale & boucle coach avec détection de silence ----
+  let recognition=null, running=false, t0=0, tick=null, loop=null, lastChange=0, askedRecently=false, cooldownUntil=0;
+  const canSTT = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+  if(!canSTT){ els.status.textContent='Reconnaissance vocale : indisponible dans ce navigateur'; }
+
+  function start(){
+    if(!canSTT){ alert('La reconnaissance vocale n’est pas disponible ici. Essayez Chrome ou Edge.'); return; }
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new Rec();
+    recognition.lang='fr-FR'; recognition.interimResults=true; recognition.continuous=true;
+    els.text.value='';
+    lastChange = Date.now();
+    askedRecently=false; cooldownUntil=0;
+    recognition.onstart=()=>{ running=true; els.status.textContent='Reconnaissance vocale : écoute en cours…'; };
+    recognition.onerror=()=>{ els.status.textContent='Reconnaissance vocale : erreur'; };
+    recognition.onend=()=>{ running=false; els.status.textContent='Reconnaissance vocale : arrêtée'; stopLoop(); };
+    recognition.onresult=(e)=>{
+      let final='', interim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const r=e.results[i];
+        if(r.isFinal) final+=r[0].transcript+' ';
+        else interim+=r[0].transcript;
+      }
+      // commandes vocales sur le texte final
+      if (final){
+        const low = final.toLowerCase();
+        if (/(rép(è|e)te|repeat)/.test(low)) repeat(Number(els.rate.value));
+        if (/(plus lentement|doucement|slow(er)?)/.test(low)) repeat(Math.max(0.6, Number(els.rate.value)*0.8));
+      }
+      els.text.value=(els.text.dataset.base||'')+final+'\n'+interim;
+      if (Date.now() > cooldownUntil) {
+        lastChange = Date.now();
+        askedRecently=false;
+      }
+    };
+    els.text.dataset.base='';
+    recognition.start();
+    els.start.disabled=true; els.stop.disabled=false;
+    t0=Date.now();
+    tick=setInterval(()=>{ const s=Math.floor((Date.now()-t0)/1000); const m=String(Math.floor(s/60)).padStart(2,'0'); const r=String(s%60).padStart(2,'0'); els.timer.textContent=m+':'+r; }, 250);
+    startLoop();
+    if (els.coachOn.checked) speak("Parfait. Je suis prêt quand vous l’êtes.", Number(els.rate.value));
+  }
+
+  function stop(){
+    try{ recognition && recognition.stop(); }catch(e){}
+    els.start.disabled=false; els.stop.disabled=true;
+    clearInterval(tick);
+    els.text.dataset.base=els.text.value;
+    stopLoop();
+  }
+
+  function ttsPrompt(){
+    const u=new SpeechSynthesisUtterance(els.prompt.textContent.trim());
+    u.lang='fr-FR'; u.rate = Number(els.rate.value) || 1.0; speechSynthesis.speak(u);
+  }
+
+  function copy(){ navigator.clipboard.writeText(els.text.value||''); }
+  function download(){
+    const blob=new Blob([els.text.value||''],{type:'text/plain'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='parle_transcription.txt'; a.click();
+  }
+
+  function startLoop(){
+    stopLoop();
+    loop = setInterval(()=>{
+      if (!els.coachOn.checked || !running) return;
+      const now = Date.now();
+      const silenceMs = Math.max(3000, Math.min(15000, Number(els.silence.value||5)*1000));
+      if (!askedRecently && now - lastChange >= silenceMs && now > cooldownUntil){
+        const lvl = current.prompt?.lvl || els.level.value || 'B1';
+        const cat = current.prompt?.cat || els.category.value || 'Small talk';
+        const q = pickFollowUp(cat, lvl, els.text.value);
+        speak(q, Number(els.rate.value));
+        askedRecently = true;
+        cooldownUntil = now + 2500; // éviter l'écho TTS pendant 2,5 s
+      }
+    }, 500);
+  }
+  function stopLoop(){ if (loop){ clearInterval(loop); loop=null; } }
+
+  // ---- Événements ----
+  els.newBtn.addEventListener('click', pick);
+  els.say.addEventListener('click', ttsPrompt);
+  els.start.addEventListener('click', start);
+  els.stop.addEventListener('click', stop);
+  els.repeat.addEventListener('click', ()=> repeat(Number(els.rate.value)));
+  els.slow.addEventListener('click', ()=> repeat(Math.max(0.6, Number(els.rate.value)*0.8)));
+
+  document.addEventListener('keydown', (e)=>{
+    if(e.key.toLowerCase()==='r'){ e.preventDefault(); pick(); }
+    if(e.code==='Space'){ e.preventDefault(); (els.stop.disabled ? start() : stop()); }
+  });
+
+  // ---- Service Worker ----
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    });
+  }
 </script>
-</body>
-</html>
