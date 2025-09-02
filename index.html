@@ -83,8 +83,310 @@
   <p class="hint">Meilleur support : Chrome/Edge (ordinateur ou Android). Sur Firefox, la reconnaissance vocale n’est pas disponible.</p>
 </div>
 
+<!-- SCRIPT -->
 <script>
-  /* le script complet va ici : (identique à la version que tu avais, mais avec textes traduits) */
+   /* =========================
+     Parle+ Mini — Script FR
+     ========================= */
+
+  // ---- Banque de sujets (A1 → C1) ----
+  var PROMPTS = [
+    {lvl:'A1', cat:'At home', t:"Présentez-vous en deux phrases."},
+    {lvl:'A1', cat:'Supermarket', t:"Commandez une baguette et un café à emporter."},
+    {lvl:'A1', cat:'Travel', t:"Demandez votre chemin vers un musée proche."},
+    {lvl:'A2', cat:'At home', t:"Décrivez votre matinée idéale en trois phrases."},
+    {lvl:'A2', cat:'Work', t:"Expliquez comment vous organisez votre journée de travail."},
+    {lvl:'A2', cat:'Travel', t:"Réservez une chambre d’hôtel pour deux nuits (dates, heure d’arrivée)."},
+    {lvl:'B1', cat:'Work', t:"Résumez un projet récent : objectif, obstacles, résultats."},
+    {lvl:'B1', cat:'Small talk', t:"Donnez votre avis sur le télétravail : 2 avantages, 2 risques."},
+    {lvl:'B1', cat:'Travel', t:"Expliquez un retard de train et demandez une solution."},
+    {lvl:'B2', cat:'Small talk', t:"Discutez d’une tendance tech et son impact quotidien avec un exemple."},
+    {lvl:'B2', cat:'Work', t:"Décrivez un conflit au travail et sa résolution, puis tirez une leçon."},
+    {lvl:'B2', cat:'Travel', t:"Comparez avion et train pour un trajet moyen (coût, temps, confort)."},
+    {lvl:'C1', cat:'Work', t:"Exposez votre vision du télétravail : compromis viables et limites."},
+    {lvl:'C1', cat:'Small talk', t:"Argumentez sur l’IA générative dans l’éducation avec nuances."},
+    {lvl:'C1', cat:'At home', t:"Défendez ou critiquez le minimalisme domestique avec un exemple concret."}
+  ];
+
+  // ---- Modèles de relance par thème et niveau ----
+  var TEMPLATES = {
+    generic: {
+      easy: [
+        "Pouvez-vous donner un exemple ?",
+        "Pourquoi ? Donnez une raison simple.",
+        "Qui ? Où ? Quand ?",
+        "Ajoutez une phrase de plus, s'il vous plaît."
+      ],
+      hard: [
+        "Nuancez votre réponse avec un contre-argument.",
+        "Donnez un exemple précis et une donnée chiffrée.",
+        "Quelles seraient les conséquences à moyen terme ?",
+        "Que proposeriez-vous comme amélioration concrète ?"
+      ]
+    },
+    'At home': {
+      easy: [
+        "Quelles trois choses voyez-vous autour de vous maintenant ?",
+        "Combien de temps y passez-vous chaque jour ?"
+      ],
+      hard: [
+        "Expliquez l'impact sur votre bien-être avec un exemple.",
+        "Proposez un changement et justifiez-le."
+      ]
+    },
+    'Supermarket': {
+      easy: [
+        "Demandez aussi le prix, s'il vous plaît.",
+        "Expliquez votre préférence : marque ou budget ?"
+      ],
+      hard: [
+        "Comparez deux options selon trois critères.",
+        "Proposez un plan B si le produit n'existe pas."
+      ]
+    },
+    'Travel': {
+      easy: [
+        "Demandez les horaires et la durée du trajet.",
+        "Prévoyez un plan B."
+      ],
+      hard: [
+        "Comparez avec une expérience précédente et tirez une leçon.",
+        "Évaluez les coûts et bénéfices du choix."
+      ]
+    },
+    'Work': {
+      easy: [
+        "Quel était l'objectif principal ?",
+        "Quelle a été la plus grande difficulté ?"
+      ],
+      hard: [
+        "Quels indicateurs de succès avez-vous utilisés ?",
+        "Quelle amélioration proposeriez-vous et pourquoi ?"
+      ]
+    },
+    'Small talk': {
+      easy: [
+        "Posez une question ouverte pour continuer.",
+        "Ajoutez un détail personnel."
+      ],
+      hard: [
+        "Nuancez avec un contre-exemple ou une limite.",
+        "Reliez ce sujet à une tendance plus large."
+      ]
+    }
+  };
+
+  function levelBand(lvl){ return (lvl==='A1' || lvl==='A2') ? 'easy' : 'hard'; }
+
+  // ---- Helpers ----
+  function pad2(n){ return ('0'+n).slice(-2); }
+
+  // ---- Synthèse vocale (TTS) ----
+  var lastCoach = "Très bien. Je vous écoute.";
+  function speak(text, rate){
+    lastCoach = text;
+    try{
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'fr-FR';
+      var r = rate || Number(document.getElementById('rate').value) || 1.0;
+      if (r < 0.5) r = 0.5; if (r > 2) r = 2;
+      u.rate = r;
+      window.speechSynthesis && speechSynthesis.speak(u);
+    }catch(e){}
+    var coachText = document.getElementById('coachText');
+    if (coachText) coachText.textContent = text;
+  }
+  function repeat(rate){ speak(lastCoach, rate); }
+
+  function pickFollowUp(category, lvl, transcript){
+    var lines = (transcript || '').split(/\n/);
+    var last = lines.length ? lines[lines.length-1] : '';
+    var num = last.match(/\b(\d{1,2})(?:[:h](\d{2}))?\b/);
+    var place = last.match(/\b(paris|lyon|marseille|barcelone|madrid|rome)\b/i);
+    if (num) return "Vous avez mentionné « " + num[0] + " ». Pouvez-vous préciser pourquoi ce chiffre est important ?";
+    if (place) return "Parlez un peu plus de " + place[0] + " : quel quartier, quelles impressions ?";
+    var band = levelBand(lvl || 'B1');
+    var bankCat = (TEMPLATES[category] && TEMPLATES[category][band]) ? TEMPLATES[category][band] : [];
+    var bankGen = TEMPLATES.generic[band];
+    var bank = bankCat.concat(bankGen);
+    return bank[Math.floor(Math.random()*bank.length)] || "Pouvez-vous développer un peu ?";
+  }
+
+  // ---- Références UI ----
+  var els = {
+    level: document.getElementById('level'),
+    category: document.getElementById('category'),
+    newBtn: document.getElementById('new'),
+    say: document.getElementById('say'),
+    prompt: document.getElementById('prompt'),
+    start: document.getElementById('start'),
+    stop: document.getElementById('stop'),
+    status: document.getElementById('status'),
+    timer: document.getElementById('timer'),
+    text: document.getElementById('text'),
+    rate: document.getElementById('rate'),
+    repeatBtn: document.getElementById('repeat'),
+    slowBtn: document.getElementById('slow'),
+    coachOn: document.getElementById('coachOn'),
+    silence: document.getElementById('silence'),
+    coachText: document.getElementById('coachText')
+  };
+
+  var current = { prompt: null };
+
+  // ---- Sélection d’un nouveau sujet ----
+  function pick(){
+    var lvl = els.level ? els.level.value : 'any';
+    var cat = els.category ? els.category.value : 'any';
+    var pool = PROMPTS.filter(function(p){
+      var okLvl = (lvl==='any' || p.lvl===lvl);
+      var okCat = (cat==='any' || p.cat===cat);
+      return okLvl && okCat;
+    });
+    var p = pool.length ? pool[Math.floor(Math.random()*pool.length)] : PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
+    current.prompt = p;
+    if (els.prompt) els.prompt.textContent = p.t;
+    if (els.coachOn && els.coachOn.checked) speak("Très bien. Allez-y, je vous écoute.", Number(els.rate && els.rate.value));
+  }
+
+  // ---- Reconnaissance vocale & boucle coach (détection de silence) ----
+  var recognition=null, running=false, t0=0, tick=null, loop=null, lastChange=0, askedRecently=false, cooldownUntil=0;
+  var canSTT = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+  if(!canSTT && els.status){ els.status.textContent='Reconnaissance vocale : indisponible dans ce navigateur'; }
+
+  function start(){
+    if(!canSTT){ alert('La reconnaissance vocale n’est pas disponible ici. Essayez Chrome ou Edge.'); return; }
+    var Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new Rec();
+    recognition.lang='fr-FR';
+    recognition.interimResults=true;
+    recognition.continuous=true;
+
+    if (els.text) els.text.value='';
+    lastChange = Date.now();
+    askedRecently=false; cooldownUntil=0;
+
+    recognition.onstart=function(){
+      running=true;
+      if (els.status) els.status.textContent='Reconnaissance vocale : écoute en cours…';
+    };
+    recognition.onerror=function(){
+      if (els.status) els.status.textContent='Reconnaissance vocale : erreur';
+    };
+    recognition.onend=function(){
+      running=false;
+      if (els.status) els.status.textContent='Reconnaissance vocale : arrêtée';
+      stopLoop();
+    };
+    recognition.onresult=function(e){
+      var final='', interim='';
+      for(var i=e.resultIndex; i<e.results.length; i++){
+        var r=e.results[i];
+        if(r.isFinal) final+=r[0].transcript+' ';
+        else interim+=r[0].transcript;
+      }
+      // commandes vocales simples
+      if (final){
+        var low = final.toLowerCase();
+        if (/(rép(è|e)te|repeat)/.test(low)) repeat(Number(els.rate && els.rate.value));
+        if (/(plus lentement|doucement|slow(er)?)/.test(low)) repeat(Math.max(0.6, Number(els.rate && els.rate.value)*0.8 || 0.8));
+      }
+      var base = (els.text && els.text.dataset && els.text.dataset.base) ? els.text.dataset.base : '';
+      if (els.text){
+        els.text.value = base + final + '\n' + interim;
+        // si on n’est pas en période de cooldown (pour éviter l’écho de la TTS)
+        if (Date.now() > cooldownUntil) {
+          lastChange = Date.now();
+          askedRecently=false;
+        }
+      }
+    };
+
+    if (els.text){
+      if (!els.text.dataset) els.text.dataset = {};
+      els.text.dataset.base='';
+    }
+    recognition.start();
+
+    if (els.start) els.start.disabled=true;
+    if (els.stop)  els.stop.disabled=false;
+
+    t0=Date.now();
+    tick=setInterval(function(){
+      var s=Math.floor((Date.now()-t0)/1000);
+      if (els.timer) els.timer.textContent = pad2(Math.floor(s/60))+':'+pad2(s%60);
+    }, 250);
+
+    startLoop();
+    if (els.coachOn && els.coachOn.checked) speak("Parfait. Je suis prêt quand vous l’êtes.", Number(els.rate && els.rate.value));
+  }
+
+  function stop(){
+    try{ recognition && recognition.stop(); }catch(e){}
+    if (els.start) els.start.disabled=false;
+    if (els.stop)  els.stop.disabled=true;
+    clearInterval(tick);
+    if (els.text){
+      if (!els.text.dataset) els.text.dataset = {};
+      els.text.dataset.base = els.text.value;
+    }
+    stopLoop();
+  }
+
+  function ttsPrompt(){
+    var txt = (els.prompt && els.prompt.textContent) ? els.prompt.textContent.trim() : '';
+    if (!txt) return;
+    try{
+      var u = new SpeechSynthesisUtterance(txt);
+      u.lang='fr-FR';
+      u.rate = Number(els.rate && els.rate.value) || 1.0;
+      speechSynthesis.speak(u);
+    }catch(e){}
+  }
+
+  function startLoop(){
+    stopLoop();
+    loop = setInterval(function(){
+      if (!(els.coachOn && els.coachOn.checked) || !running) return;
+      var now = Date.now();
+      var silenceVal = Number(els.silence && els.silence.value) || 5;
+      if (silenceVal < 3) silenceVal = 3;
+      if (silenceVal > 15) silenceVal = 15;
+      var silenceMs = silenceVal * 1000;
+
+      if (!askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil){
+        var lvl = (current && current.prompt && current.prompt.lvl) ? current.prompt.lvl : (els.level ? els.level.value : 'B1');
+        var cat = (current && current.prompt && current.prompt.cat) ? current.prompt.cat : (els.category ? els.category.value : 'Small talk');
+        var q = pickFollowUp(cat || 'Small talk', lvl || 'B1', (els.text && els.text.value) ? els.text.value : '');
+        speak(q, Number(els.rate && els.rate.value));
+        askedRecently = true;
+        cooldownUntil = now + 2500; // éviter l’écho de la TTS
+      }
+    }, 500);
+  }
+  function stopLoop(){ if (loop){ clearInterval(loop); loop=null; } }
+
+  // ---- Événements ----
+  if (els.newBtn)  els.newBtn.addEventListener('click', pick);
+  if (els.say)     els.say.addEventListener('click', ttsPrompt);
+  if (els.start)   els.start.addEventListener('click', start);
+  if (els.stop)    els.stop.addEventListener('click', stop);
+  if (els.repeatBtn) els.repeatBtn.addEventListener('click', function(){ repeat(Number(els.rate && els.rate.value)); });
+  if (els.slowBtn)   els.slowBtn.addEventListener('click', function(){ repeat(Math.max(0.6, Number(els.rate && els.rate.value)*0.8 || 0.8)); });
+
+  document.addEventListener('keydown', function(e){
+    if(e && e.key && e.key.toLowerCase()==='r'){ e.preventDefault(); pick(); }
+    if(e && e.code==='Space'){ e.preventDefault(); (els.stop && els.stop.disabled ? start() : stop()); }
+  });
+
+  // ---- Service Worker ----
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('./sw.js').catch(function(){});
+    });
+  }
+  /* le script complet (JS) est ici : */
+  /* === colle ici le script que je t’ai donné dans ma réponse précédente === */
 </script>
 </body>
 </html>
