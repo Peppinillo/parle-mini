@@ -1,6 +1,6 @@
 <script>
   // ---- Banque de sujets (avec B2/C1) ----
-  const PROMPTS = [
+  var PROMPTS = [
     {lvl:'A1', cat:'At home', t:"Présentez-vous en deux phrases."},
     {lvl:'A1', cat:'Supermarket', t:"Commandez une baguette et un café à emporter."},
     {lvl:'A1', cat:'Travel', t:"Demandez votre chemin vers un musée proche."},
@@ -19,7 +19,7 @@
   ];
 
   // ---- Modèles de relance par thème et niveau ----
-  const TEMPLATES = {
+  var TEMPLATES = {
     generic: {
       easy: [
         "Pouvez-vous donner un exemple ?",
@@ -86,39 +86,38 @@
     }
   };
 
-  function levelBand(lvl){
-    return ['A1','A2'].includes(lvl) ? 'easy' : 'hard';
-  }
+  function levelBand(lvl){ return (lvl==='A1' || lvl==='A2') ? 'easy' : 'hard'; }
 
   // ---- Synthèse vocale ----
-  let lastCoach = "Très bien. Je vous écoute.";
+  var lastCoach = "Très bien. Je vous écoute.";
   function speak(text, rate){
     lastCoach = text;
     try{
-      const u = new SpeechSynthesisUtterance(text);
+      var u = new SpeechSynthesisUtterance(text);
       u.lang = 'fr-FR';
       u.rate = rate || Number(document.getElementById('rate').value) || 1.0;
       speechSynthesis.speak(u);
-    }catch(e){/* ignore */}
+    }catch(e){}
     document.getElementById('coachText').textContent = text;
   }
   function repeat(rate){ speak(lastCoach, rate); }
 
   function pickFollowUp(category, lvl, transcript){
-    const last = (transcript || '').split(/\n/).slice(-1)[0] || '';
-    const num = last.match(/\b(\d{1,2})(?:[:h](\d{2}))?\b/);
-    const place = last.match(/\b(paris|lyon|marseille|barcelone|madrid|rome)\b/i);
-    if (num) return `Vous avez mentionné « ${num[0]} ». Pouvez-vous préciser pourquoi ce chiffre est important ?`;
-    if (place) return `Parlez un peu plus de ${place[0]} : quel quartier, quelles impressions ?`;
-    const band = levelBand(lvl || 'B1');
-    const bankCat = (TEMPLATES[category] && TEMPLATES[category][band]) ? TEMPLATES[category][band] : [];
-    const bankGen = TEMPLATES.generic[band];
-    const bank = bankCat.concat(bankGen);
+    var lines = (transcript || '').split(/\n/);
+    var last = lines.length ? lines[lines.length-1] : '';
+    var num = last.match(/\b(\d{1,2})(?:[:h](\d{2}))?\b/);
+    var place = last.match(/\b(paris|lyon|marseille|barcelone|madrid|rome)\b/i);
+    if (num) return "Vous avez mentionné « " + num[0] + " ». Pouvez-vous préciser pourquoi ce chiffre est important ?";
+    if (place) return "Parlez un peu plus de " + place[0] + " : quel quartier, quelles impressions ?";
+    var band = levelBand(lvl || 'B1');
+    var bankCat = (TEMPLATES[category] && TEMPLATES[category][band]) ? TEMPLATES[category][band] : [];
+    var bankGen = TEMPLATES.generic[band];
+    var bank = bankCat.concat(bankGen);
     return bank[Math.floor(Math.random()*bank.length)] || "Pouvez-vous développer un peu ?";
   }
 
   // ---- Références UI ----
-  const els = {
+  var els = {
     level: document.getElementById('level'),
     category: document.getElementById('category'),
     newBtn: document.getElementById('new'),
@@ -137,57 +136,58 @@
     coachText: document.getElementById('coachText')
   };
 
-  const current = {prompt:null};
+  var current = { prompt: null };
 
   function pick(){
-    const lvl = els.level.value, cat = els.category.value;
-    const pool = PROMPTS.filter(p=> (lvl==='any'||p.lvl===lvl) && (cat==='any'||p.cat===cat));
-    const p = pool[Math.floor(Math.random()*pool.length)] || PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
+    var lvl = els.level.value, cat = els.category.value;
+    var pool = PROMPTS.filter(function(p){ return (lvl==='any'||p.lvl===lvl) && (cat==='any'||p.cat===cat); });
+    var p = pool.length ? pool[Math.floor(Math.random()*pool.length)] : PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
     current.prompt = p;
     els.prompt.textContent = p.t;
     if (els.coachOn.checked) speak("Très bien. Allez-y, je vous écoute.", Number(els.rate.value));
   }
 
   // ---- Reconnaissance vocale & boucle coach avec détection de silence ----
-  let recognition=null, running=false, t0=0, tick=null, loop=null, lastChange=0, askedRecently=false, cooldownUntil=0;
-  const canSTT = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+  var recognition=null, running=false, t0=0, tick=null, loop=null, lastChange=0, askedRecently=false, cooldownUntil=0;
+  var canSTT = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
   if(!canSTT){ els.status.textContent='Reconnaissance vocale : indisponible dans ce navigateur'; }
 
   function start(){
     if(!canSTT){ alert('La reconnaissance vocale n’est pas disponible ici. Essayez Chrome ou Edge.'); return; }
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new Rec();
     recognition.lang='fr-FR'; recognition.interimResults=true; recognition.continuous=true;
     els.text.value='';
     lastChange = Date.now();
     askedRecently=false; cooldownUntil=0;
-    recognition.onstart=()=>{ running=true; els.status.textContent='Reconnaissance vocale : écoute en cours…'; };
-    recognition.onerror=()=>{ els.status.textContent='Reconnaissance vocale : erreur'; };
-    recognition.onend=()=>{ running=false; els.status.textContent='Reconnaissance vocale : arrêtée'; stopLoop(); };
-    recognition.onresult=(e)=>{
-      let final='', interim='';
-      for(let i=e.resultIndex;i<e.results.length;i++){
-        const r=e.results[i];
+    recognition.onstart=function(){ running=true; els.status.textContent='Reconnaissance vocale : écoute en cours…'; };
+    recognition.onerror=function(){ els.status.textContent='Reconnaissance vocale : erreur'; };
+    recognition.onend=function(){ running=false; els.status.textContent='Reconnaissance vocale : arrêtée'; stopLoop(); };
+    recognition.onresult=function(e){
+      var final='', interim='';
+      for(var i=e.resultIndex; i<e.results.length; i++){
+        var r=e.results[i];
         if(r.isFinal) final+=r[0].transcript+' ';
         else interim+=r[0].transcript;
       }
-      // commandes vocales sur le texte final
       if (final){
-        const low = final.toLowerCase();
+        var low = final.toLowerCase();
         if (/(rép(è|e)te|repeat)/.test(low)) repeat(Number(els.rate.value));
         if (/(plus lentement|doucement|slow(er)?)/.test(low)) repeat(Math.max(0.6, Number(els.rate.value)*0.8));
       }
       els.text.value=(els.text.dataset.base||'')+final+'\n'+interim;
-      if (Date.now() > cooldownUntil) {
-        lastChange = Date.now();
-        askedRecently=false;
-      }
+      if (Date.now() > cooldownUntil) { lastChange = Date.now(); askedRecently=false; }
     };
     els.text.dataset.base='';
     recognition.start();
     els.start.disabled=true; els.stop.disabled=false;
     t0=Date.now();
-    tick=setInterval(()=>{ const s=Math.floor((Date.now()-t0)/1000); const m=String(Math.floor(s/60)).padStart(2,'0'); const r=String(s%60).padStart(2,'0'); els.timer.textContent=m+':'+r; }, 250);
+    tick=setInterval(function(){
+      var s=Math.floor((Date.now()-t0)/1000);
+      var m=('0'+Math.floor(s/60)).slice(-2);
+      var r=('0'+(s%60)).slice(-2);
+      els.timer.textContent=m+':'+r;
+    }, 250);
     startLoop();
     if (els.coachOn.checked) speak("Parfait. Je suis prêt quand vous l’êtes.", Number(els.rate.value));
   }
@@ -201,26 +201,26 @@
   }
 
   function ttsPrompt(){
-    const u=new SpeechSynthesisUtterance(els.prompt.textContent.trim());
+    var u=new SpeechSynthesisUtterance(els.prompt.textContent.trim());
     u.lang='fr-FR'; u.rate = Number(els.rate.value) || 1.0; speechSynthesis.speak(u);
   }
 
   function copy(){ navigator.clipboard.writeText(els.text.value||''); }
   function download(){
-    const blob=new Blob([els.text.value||''],{type:'text/plain'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='parle_transcription.txt'; a.click();
+    var blob=new Blob([els.text.value||''],{type:'text/plain'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='parle_transcription.txt'; a.click();
   }
 
   function startLoop(){
     stopLoop();
-    loop = setInterval(()=>{
+    loop = setInterval(function(){
       if (!els.coachOn.checked || !running) return;
-      const now = Date.now();
-      const silenceMs = Math.max(3000, Math.min(15000, Number(els.silence.value||5)*1000));
-      if (!askedRecently && now - lastChange >= silenceMs && now > cooldownUntil){
-        const lvl = current.prompt?.lvl || els.level.value || 'B1';
-        const cat = current.prompt?.cat || els.category.value || 'Small talk';
-        const q = pickFollowUp(cat, lvl, els.text.value);
+      var now = Date.now();
+      var silenceMs = Math.max(3000, Math.min(15000, Number(els.silence.value||5)*1000));
+      if (!askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil){
+        var lvl = (current && current.prompt && current.prompt.lvl) ? current.prompt.lvl : (els.level.value || 'B1');
+        var cat = (current && current.prompt && current.prompt.cat) ? current.prompt.cat : (els.category.value || 'Small talk');
+        var q = pickFollowUp(cat, lvl, els.text.value);
         speak(q, Number(els.rate.value));
         askedRecently = true;
         cooldownUntil = now + 2500; // éviter l'écho TTS pendant 2,5 s
@@ -234,18 +234,18 @@
   els.say.addEventListener('click', ttsPrompt);
   els.start.addEventListener('click', start);
   els.stop.addEventListener('click', stop);
-  els.repeat.addEventListener('click', ()=> repeat(Number(els.rate.value)));
-  els.slow.addEventListener('click', ()=> repeat(Math.max(0.6, Number(els.rate.value)*0.8)));
+  els.repeat.addEventListener('click', function(){ repeat(Number(els.rate.value)); });
+  els.slow.addEventListener('click', function(){ repeat(Math.max(0.6, Number(els.rate.value)*0.8)); });
 
-  document.addEventListener('keydown', (e)=>{
-    if(e.key.toLowerCase()==='r'){ e.preventDefault(); pick(); }
+  document.addEventListener('keydown', function(e){
+    if(e.key && e.key.toLowerCase()==='r'){ e.preventDefault(); pick(); }
     if(e.code==='Space'){ e.preventDefault(); (els.stop.disabled ? start() : stop()); }
   });
 
   // ---- Service Worker ----
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('./sw.js').catch(function(){});
     });
   }
 </script>
