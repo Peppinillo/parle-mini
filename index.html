@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="theme-color" content="#0b1020" />
+<link rel="manifest" href="manifest.webmanifest" />
+<title>Parle+ Mini</title>
+<style>
+  :root{--bg:#0b1020;--card:#141a2e;--line:#1e2746;--text:#e8eefc;--muted:#9fb3d9;--accent:#7aa2ff}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Inter,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#0b1020,#10152a);color:var(--text)}
+  .wrap{max-width:820px;margin:32px auto;padding:0 16px}
+  h1{font-size:20px;margin:0 0 8px} p{margin:0 0 14px;color:var(--muted)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 14px 12px;box-shadow:0 8px 22px rgba(0,0,0,.25);margin-bottom:14px}
+  label{font-size:12px;color:var(--muted)} select,button,textarea,input[type='number']{border-radius:12px;border:1px solid var(--line);background:#0e1430;color:var(--text)}
+  select,button{padding:10px 12px;font-weight:600} button{cursor:pointer}
+  button.primary{background:linear-gradient(180deg,#3f67ff,#2a4de7);border-color:#3a56d9}
+  button.ghost{background:transparent}
+  .prompt{font-size:18px;line-height:1.4;border:1px dashed var(--line);border-radius:14px;padding:12px;background:#0b1226;margin:8px 0}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  textarea{width:100%;min-height:130px;padding:12px;resize:vertical}
+  .hint{color:var(--muted);font-size:12px}
+  .coach{padding:10px;border-radius:12px;background:#0b1226;border:1px solid #25305a}
+  .coach b{color:#cfe0ff}
+  .q{margin:6px 0 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Parle+ Mini</h1>
+  <p>Ultra-simple French speaking practice. Now with a lightweight <b>Coach mode</b> that asks follow-up questions to simulate a dialogue — no server needed.</p>
+
+  <div class="card">
+    <label>Pick level</label>
+    <div class="row">
+      <select id="level">
+        <option value="any">Any</option>
+        <option>A1</option>
+        <option>A2</option>
+        <option>B1</option>
+      </select>
+      <select id="category">
+        <option value="any">Any category</option>
+        <option>At home</option><option>Supermarket</option><option>Travel</option>
+        <option>Work</option><option>Small talk</option>
+      </select>
+      <button id="new" class="primary">New prompt (R)</button>
+      <button id="say" class="ghost">🔊 Read aloud</button>
+      <span class="hint">Tip: Press <b>R</b> for another prompt</span>
+    </div>
+    <div id="prompt" class="prompt">Click “New prompt” to start.</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="start" class="primary">Start (Space)</button>
+      <button id="stop" class="ghost" disabled>Stop</button>
+      <span class="hint" id="status">STT: idle</span>
+      <span class="hint" id="timer">00:00</span>
+      <button id="copy" class="ghost">Copy transcript</button>
+      <button id="download" class="ghost">Download .txt</button>
+    </div>
+    <label style="display:block;margin-top:8px">Live transcript (fr‑FR)</label>
+    <textarea id="text" placeholder="Your speech appears here…"></textarea>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:4px 0 10px">Coach mode</h3>
+    <div class="row">
+      <label><input type="checkbox" id="coachOn"> Enable coach</label>
+      <label>Auto follow-up every <input type="number" id="interval" min="10" max="90" step="5" value="25" style="width:64px"> s</label>
+      <button id="nextQ" class="ghost">Next follow-up now</button>
+      <span class="hint">The coach adapts questions with simple rules from your latest answer.</span>
+    </div>
+    <div id="coach" class="coach">
+      <div><b>Assistant:</b> <span id="coachText" class="q">Coach is off.</span></div>
+    </div>
+  </div>
+
+  <p class="hint">Speech recognition uses the browser Web Speech API. Best support on Chrome/Edge desktop or Android. iOS Safari is limited.</p>
+</div>
+
+<script>
+  // --- small prompt set
+  const PROMPTS = [
+    {lvl:'A1', cat:'At home', t:"Présentez-vous en deux phrases."},
+    {lvl:'A1', cat:'Supermarket', t:"Commandez une baguette et un café à emporter."},
+    {lvl:'A1', cat:'Travel', t:"Demandez votre chemin vers un musée proche."},
+    {lvl:'A2', cat:'At home', t:"Décrivez votre matinée idéale en trois phrases."},
+    {lvl:'A2', cat:'Work', t:"Expliquez comment vous organisez votre journée de travail."},
+    {lvl:'A2', cat:'Travel', t:"Réservez une chambre d’hôtel pour deux nuits (dates, heure d’arrivée)."},
+    {lvl:'B1', cat:'Work', t:"Résumez un projet récent: objectif, obstacles, résultats."},
+    {lvl:'B1', cat:'Small talk', t:"Donnez votre avis sur le télétravail: 2 avantages, 2 risques."},
+    {lvl:'B1', cat:'Travel', t:"Expliquez un retard de train et demandez une solution."}
+  ];
+
+  // Coach follow-up templates per category/level band
+  const TEMPLATES = {
+    generic: [
+      "Pouvez-vous préciser un détail en plus ?",
+      "Pourquoi ? Donnez une raison.",
+      "Et ensuite ? Quelle serait l'étape suivante ?",
+      "Ajoutez un exemple concret, s'il vous plaît.",
+      "Que feriez-vous différemment la prochaine fois ?"
+    ],
+    'At home': [
+      "Quelles trois choses voyez-vous autour de vous maintenant ?",
+      "Combien de temps y consacrez-vous chaque jour ?",
+      "Avec qui partagez-vous cela ?"
+    ],
+    'Supermarket': [
+      "Demandez aussi le prix et proposez une alternative.",
+      "Expliquez votre préférence: marque, goût ou budget ?",
+      "Que ferez-vous si le produit n'est pas disponible ?"
+    ],
+    'Travel': [
+      "Demandez les horaires et la durée du trajet.",
+      "Proposez un plan B si ce n'est pas possible.",
+      "Décrivez un souvenir de voyage similaire."
+    ],
+    'Work': [
+      "Quels étaient vos indicateurs de succès ?",
+      "Quelle a été la plus grande difficulté ?",
+      "Que proposeriez-vous pour améliorer le processus ?"
+    ],
+    'Small talk': [
+      "Posez une question ouverte pour continuer la conversation.",
+      "Nuancez votre opinion avec un contre-exemple.",
+      "Reliez ce sujet à votre expérience personnelle."
+    ]
+  };
+
+  function coachSay(text){
+    const out = document.getElementById('coachText');
+    out.textContent = text;
+    try{
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'fr-FR';
+      speechSynthesis.speak(u);
+    }catch(e){/* ignore speech errors */}
+  }
+
+  function pickFollowUp(category, transcript){
+    // Heuristics: look for numbers, times, places to reference back
+    const last = (transcript || '').split(/\n/).slice(-1)[0] || '';
+    const num = last.match(/\b(\d{1,2})(?:[:h](\d{2}))?\b/);
+    const place = last.match(/\b(paris|lyon|marseille|barcelone|madrid|rome)\b/i);
+    if (num) return `Vous avez mentionné "${num[0]}". Pouvez-vous préciser pourquoi ce chiffre est important ?`;
+    if (place) return `Parlez un peu plus de ${place[0]} : quel quartier, quelles impressions ?`;
+
+    const bank = (TEMPLATES[category] || []).concat(TEMPLATES.generic);
+    return bank[Math.floor(Math.random()*bank.length)];
+  }
+
+  // --- UI refs
+  const els = {
+    level: document.getElementById('level'),
+    category: document.getElementById('category'),
+    newBtn: document.getElementById('new'),
+    say: document.getElementById('say'),
+    prompt: document.getElementById('prompt'),
+    start: document.getElementById('start'),
+    stop: document.getElementById('stop'),
+    status: document.getElementById('status'),
+    timer: document.getElementById('timer'),
+    text: document.getElementById('text'),
+    copy: document.getElementById('copy'),
+    dl: document.getElementById('download'),
+    coachOn: document.getElementById('coachOn'),
+    interval: document.getElementById('interval'),
+    nextQ: document.getElementById('nextQ')
+  };
+
+  function pick(){
+    const lvl = els.level.value, cat = els.category.value;
+    const pool = PROMPTS.filter(p=> (lvl==='any'||p.lvl===lvl) && (cat==='any'||p.cat===cat));
+    const p = pool[Math.floor(Math.random()*pool.length)] || PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
+    current.prompt = p;
+    els.prompt.textContent = p.t;
+    if (els.coachOn.checked) coachSay("Très bien. Allez-y. Je vous écoute.");
+  }
+
+  // --- STT ---
+  let recognition=null, running=false, t0=0, tick=null, coachTick=null;
+  const canSTT = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+  if(!canSTT){ els.status.textContent='STT: unavailable'; }
+
+  function start(){
+    if(!canSTT){ alert('Speech recognition not supported in this browser. Try Chrome/Edge.'); return; }
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new Rec();
+    recognition.lang='fr-FR'; recognition.interimResults=true; recognition.continuous=true;
+    els.text.value='';
+    recognition.onstart=()=>{ running=true; els.status.textContent='STT: listening…'; };
+    recognition.onerror=()=>{ els.status.textContent='STT error'; };
+    recognition.onend=()=>{ running=false; els.status.textContent='STT: stopped'; stopCoachTimer(); };
+    recognition.onresult=(e)=>{
+      let final='', interim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const r=e.results[i];
+        if(r.isFinal) final+=r[0].transcript+' ';
+        else interim+=r[0].transcript;
+      }
+      els.text.value=(els.text.dataset.base||'')+final+'\n'+interim;
+    };
+    els.text.dataset.base='';
+    recognition.start();
+    els.start.disabled=true; els.stop.disabled=false;
+    t0=Date.now();
+    tick=setInterval(()=>{ const s=Math.floor((Date.now()-t0)/1000); const m=String(Math.floor(s/60)).padStart(2,'0'); const r=String(s%60).padStart(2,'0'); els.timer.textContent=m+':'+r; }, 250);
+    startCoachTimer();
+  }
+
+  function stop(){
+    try{ recognition && recognition.stop(); }catch(e){}
+    els.start.disabled=false; els.stop.disabled=true;
+    clearInterval(tick);
+    els.text.dataset.base=els.text.value;
+    stopCoachTimer();
+  }
+
+  function tts(){
+    const u=new SpeechSynthesisUtterance(els.prompt.textContent.trim());
+    u.lang='fr-FR'; speechSynthesis.speak(u);
+  }
+
+  function copy(){ navigator.clipboard.writeText(els.text.value||''); }
+  function download(){
+    const blob=new Blob([els.text.value||''],{type:'text/plain'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='parle_transcript.txt'; a.click();
+  }
+
+  // --- Coach timers/logic ---
+  const current = {prompt:null};
+  function startCoachTimer(){
+    if (!els.coachOn.checked) return;
+    const ask = ()=>{
+      const cat = current.prompt?.cat || els.category.value || 'generic';
+      coachSay(pickFollowUp(cat, els.text.value));
+    };
+    ask(); // ask immediately once recording starts
+    const int = Math.max(10, Math.min(90, Number(els.interval.value)||25)) * 1000;
+    coachTick = setInterval(ask, int);
+  }
+  function stopCoachTimer(){ if (coachTick) { clearInterval(coachTick); coachTick=null; } }
+  els.nextQ.addEventListener('click', ()=>{
+    const cat = current.prompt?.cat || els.category.value || 'generic';
+    coachSay(pickFollowUp(cat, els.text.value));
+  });
+
+  // --- Events ---
+  els.newBtn.addEventListener('click', pick);
+  els.say.addEventListener('click', tts);
+  els.start.addEventListener('click', start);
+  els.stop.addEventListener('click', stop);
+  els.copy.addEventListener('click', copy);
+  els.dl.addEventListener('click', download);
+  els.coachOn.addEventListener('change', ()=>{
+    document.getElementById('coachText').textContent = els.coachOn.checked ? "Coach activé. Je poserai des questions." : "Coach is off.";
+  });
+
+  document.addEventListener('keydown', (e)=>{
+    if(e.key.toLowerCase()==='r'){ e.preventDefault(); pick(); }
+    if(e.code==='Space'){ e.preventDefault(); running? stop() : start(); }
+  });
+
+  // --- SW registration ---
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    });
+  }
+</script>
+</body>
+</html>
