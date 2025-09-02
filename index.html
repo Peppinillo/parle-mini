@@ -85,7 +85,7 @@
 
 <script>
 /* =========================
-   Parle+ Mini — Script FR (Android/Brave fix)
+   Parle+ Mini — Script FR (interactive fix for Android/Brave)
    ========================= */
 
 /* --- Banque de sujets (A1 → C1) --- */
@@ -139,21 +139,22 @@ var TEMPLATES = {
 function levelBand(lvl){ return (lvl==='A1' || lvl==='A2') ? 'easy' : 'hard'; }
 function pad2(n){ return ('0'+n).slice(-2); }
 
-/* --- Flags pour Android/Brave --- */
-var wantListening = false;   // on veut rester en écoute tant que l’utilisateur n’a pas cliqué Arrêter
-var ttsSpeaking   = false;   // TTS en cours
-var manuallyStopped = false; // bouton Arrêter cliqué par l’utilisateur
+/* --- États globaux --- */
+var wantListening = false;    // on veut rester en écoute (tant que non arrêté manuellement)
+var ttsSpeaking   = false;    // la TTS parle actuellement
+var manuallyStopped = false;  // bouton Arrêter cliqué
+var heardAnything = false;    // a-t-on entendu l’utilisateur au moins une fois ?
+var watchdog = null;          // redémarrage auto si l’écoute s’arrête
 
-/* --- TTS (avec annulation et auto-resume) --- */
+/* --- TTS (avec annulation + auto-resume) --- */
 var lastCoach = "Très bien. Je vous écoute.";
 function speak(text, rate){
   lastCoach = text;
-  // afficher le texte immédiatement
   var coachText = document.getElementById('coachText');
   if (coachText) coachText.textContent = text;
 
   try{
-    if (window.speechSynthesis) { speechSynthesis.cancel(); } // vide la file (évite doublons)
+    if (window.speechSynthesis) { speechSynthesis.cancel(); } // éviter la file d'attente
     var u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
     var r = rate || Number(document.getElementById('rate').value) || 1.0;
@@ -163,7 +164,7 @@ function speak(text, rate){
     u.onstart = function(){ ttsSpeaking = true; };
     u.onend   = function(){
       ttsSpeaking = false;
-      // Sur Android/Brave, la TTS peut interrompre l’écoute : relancer si besoin
+      // Si la TTS a interrompu l'écoute, relancer (sauf si l'utilisateur a arrêté)
       if (wantListening && !running && !manuallyStopped) {
         setTimeout(function(){ try{ recognition && recognition.start(); }catch(e){} }, 120);
       }
@@ -174,7 +175,7 @@ function speak(text, rate){
 }
 function repeat(rate){ speak(lastCoach, rate); }
 
-/* --- Suivi de l'UI --- */
+/* --- UI refs --- */
 var els = {
   level: document.getElementById('level'),
   category: document.getElementById('category'),
@@ -195,7 +196,7 @@ var els = {
 };
 var current = { prompt: null };
 
-/* --- Choisir un nouveau sujet --- */
+/* --- Nouveau sujet --- */
 function pick(){
   var lvl = els.level ? els.level.value : 'any';
   var cat = els.category ? els.category.value : 'any';
@@ -208,9 +209,9 @@ function pick(){
   current.prompt = p;
   if (els.prompt) els.prompt.textContent = p.t;
 
-  // IMPORTANT: pas de TTS automatique ici pour éviter d’interrompre l’écoute au démarrage
-  if (els.coachOn && els.coachOn.checked) {
-    if (els.coachText) els.coachText.textContent = "Très bien. Allez-y, je vous écoute.";
+  // texte d’amorce uniquement (pas de TTS) pour ne pas couper le micro
+  if (els.coachOn && els.coachOn.checked && els.coachText){
+    els.coachText.textContent = "Très bien. Allez-y, je vous écoute.";
   }
 }
 
@@ -223,6 +224,7 @@ function start(){
   if(!canSTT){ alert('La reconnaissance vocale n’est pas disponible ici. Essayez Chrome ou Edge.'); return; }
   manuallyStopped = false;
   wantListening = true;
+  heardAnything = false;
 
   var Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new Rec();
@@ -240,14 +242,7 @@ function start(){
     running=false;
     if (els.status) els.status.textContent='Reconnaissance vocale : arrêtée';
     stopLoop();
-    // Si l’arrêt n’est pas volontaire et qu’on veut rester en écoute, relancer (sauf si TTS parle)
-    if (wantListening && !manuallyStopped){
-      if (!ttsSpeaking){
-        setTimeout(function(){ try{ recognition && recognition.start(); }catch(e){} }, 120);
-      } else {
-        // la TTS va relancer à la fin via u.onend
-      }
-    }
+    // Watchdog se chargera de relancer si nécessaire
   };
   recognition.onresult=function(e){
     var final='', interim='';
@@ -256,11 +251,18 @@ function start(){
       if(r.isFinal) final+=r[0].transcript+' ';
       else interim+=r[0].transcript;
     }
+
+    // a-t-on entendu au moins 3 mots (interim ou final) ?
+    var lastChunk = (final || interim || '').trim();
+    if (lastChunk.split(/\s+/).filter(Boolean).length >= 3) { heardAnything = true; }
+
+    // commandes vocales
     if (final){
       var low = final.toLowerCase();
       if (/(rép(è|e)te|repeat)/.test(low)) repeat(Number(els.rate && els.rate.value));
       if (/(plus lentement|doucement|slow(er)?)/.test(low)) repeat(Math.max(0.6, Number(els.rate && els.rate.value)*0.8 || 0.8));
     }
+
     var base = (els.text && els.text.dataset && els.text.dataset.base) ? els.text.dataset.base : '';
     if (els.text){
       els.text.value = base + final + '\n' + interim;
@@ -281,10 +283,11 @@ function start(){
   }, 250);
 
   startLoop();
+  startWatchdog();
 
-  // IMPORTANT: plus de TTS automatique au démarrage (texte uniquement)
-  if (els.coachOn && els.coachOn.checked) {
-    if (els.coachText) els.coachText.textContent = "Parfait. Je suis prêt quand vous l’êtes.";
+  // message d’amorce en texte seulement (pas de TTS)
+  if (els.coachOn && els.coachOn.checked && els.coachText) {
+    els.coachText.textContent = "Parfait. Je suis prêt quand vous l’êtes.";
   }
 }
 
@@ -297,14 +300,10 @@ function stop(){
   clearInterval(tick);
   if (els.text){ if (!els.text.dataset) els.text.dataset = {}; els.text.dataset.base = els.text.value; }
   stopLoop();
+  stopWatchdog();
 }
 
-function ttsPrompt(){
-  var txt = (els.prompt && els.prompt.textContent) ? els.prompt.textContent.trim() : '';
-  if (!txt) return;
-  speak(txt, Number(els.rate && els.rate.value) || 1.0);
-}
-
+/* --- Boucle des relances --- */
 function startLoop(){
   stopLoop();
   loop = setInterval(function(){
@@ -315,21 +314,70 @@ function startLoop(){
     if (silenceVal > 15) silenceVal = 15;
     var silenceMs = silenceVal * 1000;
 
-    // pas de relance pendant que la TTS parle
-    if (ttsSpeaking) return;
+    if (ttsSpeaking) return; // ne pas relancer pendant que la TTS parle
 
-    if (!askedRecently && running && (now - lastChange) >= silenceMs && now > cooldownUntil){
+    // Si l’utilisateur n’a RIEN dit au bout de 8 s, nudge d’amorce
+    if (!heardAnything && running && (now - lastChange) >= 8000) {
+      speak("Je ne vous entends pas encore. Commencez quand vous voulez : une ou deux phrases suffisent.", Number(els.rate && els.rate.value));
+      heardAnything = true; // éviter de répéter le nudge
+      lastChange = Date.now();
+      return;
+    }
+
+    // Relance normale après silence, seulement si on a déjà entendu l’utilisateur
+    if (heardAnything && running && !askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil){
       var lvl = (current && current.prompt && current.prompt.lvl) ? current.prompt.lvl : (els.level ? els.level.value : 'B1');
       var cat = (current && current.prompt && current.prompt.cat) ? current.prompt.cat : (els.category ? els.category.value : 'Small talk');
       var transcript = (els.text && els.text.value) ? els.text.value : '';
       var q = pickFollowUp(cat || 'Small talk', lvl || 'B1', transcript);
-      speak(q, Number(els.rate && els.rate.value));
+
+      // Petit délai pour Android au TTS #1
+      if (!window.__firstFollowUpDone) {
+        window.__firstFollowUpDone = true;
+        setTimeout(function(){ speak(q, Number(els.rate && els.rate.value)); }, 800);
+      } else {
+        speak(q, Number(els.rate && els.rate.value));
+      }
+
       askedRecently = true;
-      cooldownUntil = now + 1200; // courte fenêtre anti-echo
+      cooldownUntil = now + 1200; // petite fenêtre anti-écho
     }
   }, 400);
 }
 function stopLoop(){ if (loop){ clearInterval(loop); loop=null; } }
+
+/* --- Watchdog : relance l’écoute si elle s’arrête (Android/Brave) --- */
+function startWatchdog(){
+  stopWatchdog();
+  watchdog = setInterval(function(){
+    if (wantListening && !running && !ttsSpeaking && !manuallyStopped){
+      try{ recognition && recognition.start(); }catch(e){}
+    }
+  }, 1000);
+}
+function stopWatchdog(){ if (watchdog){ clearInterval(watchdog); watchdog=null; } }
+
+/* --- Génération de relance --- */
+function pickFollowUp(category, lvl, transcript){
+  var lines = (transcript || '').split(/\n/);
+  var last = lines.length ? lines[lines.length-1] : '';
+  var num = last.match(/\b(\d{1,2})(?:[:h](\d{2}))?\b/);
+  var place = last.match(/\b(paris|lyon|marseille|barcelone|madrid|rome)\b/i);
+  if (num) return "Vous avez mentionné « " + num[0] + " ». Pouvez-vous préciser pourquoi ce chiffre est important ?";
+  if (place) return "Parlez un peu plus de " + place[0] + " : quel quartier, quelles impressions ?";
+  var band = levelBand(lvl || 'B1');
+  var bankCat = (TEMPLATES[category] && TEMPLATES[category][band]) ? TEMPLATES[category][band] : [];
+  var bankGen = TEMPLATES.generic[band];
+  var bank = bankCat.concat(bankGen);
+  return bank[Math.floor(Math.random()*bank.length)] || "Pouvez-vous développer un peu ?";
+}
+
+/* --- Actions UI --- */
+function ttsPrompt(){
+  var txt = (els.prompt && els.prompt.textContent) ? els.prompt.textContent.trim() : '';
+  if (!txt) return;
+  speak(txt, Number(els.rate && els.rate.value) || 1.0);
+}
 
 /* --- Événements --- */
 if (els.newBtn)  els.newBtn.addEventListener('click', pick);
@@ -344,13 +392,14 @@ document.addEventListener('keydown', function(e){
   if(e && e.code==='Space'){ e.preventDefault(); (els.stop && els.stop.disabled ? start() : stop()); }
 });
 
-/* --- Service Worker --- */
+/* --- SW --- */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('./sw.js').catch(function(){});
   });
 }
 </script>
+
 
 </body>
 </html>
