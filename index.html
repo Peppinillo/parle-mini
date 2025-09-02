@@ -85,7 +85,7 @@
 
 <script>
 /* =========================
-   Parle+ Mini — Script FR (sécurisé)
+   Parle+ Mini — Script FR (Android/Brave fix)
    ========================= */
 
 /* --- Banque de sujets (A1 → C1) --- */
@@ -139,20 +139,38 @@ var TEMPLATES = {
 function levelBand(lvl){ return (lvl==='A1' || lvl==='A2') ? 'easy' : 'hard'; }
 function pad2(n){ return ('0'+n).slice(-2); }
 
-/* --- TTS --- */
+/* --- Flags pour Android/Brave --- */
+var wantListening = false;   // on veut rester en écoute tant que l’utilisateur n’a pas cliqué Arrêter
+var ttsSpeaking   = false;   // TTS en cours
+var manuallyStopped = false; // bouton Arrêter cliqué par l’utilisateur
+
+/* --- TTS (avec annulation et auto-resume) --- */
 var lastCoach = "Très bien. Je vous écoute.";
 function speak(text, rate){
   lastCoach = text;
+  // afficher le texte immédiatement
+  var coachText = document.getElementById('coachText');
+  if (coachText) coachText.textContent = text;
+
   try{
+    if (window.speechSynthesis) { speechSynthesis.cancel(); } // vide la file (évite doublons)
     var u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
     var r = rate || Number(document.getElementById('rate').value) || 1.0;
     if (r < 0.5) r = 0.5; if (r > 2) r = 2;
     u.rate = r;
-    window.speechSynthesis && speechSynthesis.speak(u);
+
+    u.onstart = function(){ ttsSpeaking = true; };
+    u.onend   = function(){
+      ttsSpeaking = false;
+      // Sur Android/Brave, la TTS peut interrompre l’écoute : relancer si besoin
+      if (wantListening && !running && !manuallyStopped) {
+        setTimeout(function(){ try{ recognition && recognition.start(); }catch(e){} }, 120);
+      }
+    };
+
+    speechSynthesis.speak(u);
   }catch(e){}
-  var coachText = document.getElementById('coachText');
-  if (coachText) coachText.textContent = text;
 }
 function repeat(rate){ speak(lastCoach, rate); }
 
@@ -189,7 +207,11 @@ function pick(){
   var p = pool.length ? pool[Math.floor(Math.random()*pool.length)] : PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
   current.prompt = p;
   if (els.prompt) els.prompt.textContent = p.t;
-  if (els.coachOn && els.coachOn.checked) speak("Très bien. Allez-y, je vous écoute.", Number(els.rate && els.rate.value));
+
+  // IMPORTANT: pas de TTS automatique ici pour éviter d’interrompre l’écoute au démarrage
+  if (els.coachOn && els.coachOn.checked) {
+    if (els.coachText) els.coachText.textContent = "Très bien. Allez-y, je vous écoute.";
+  }
 }
 
 /* --- Reconnaissance vocale + coach (silence) --- */
@@ -199,6 +221,9 @@ if(!canSTT && els.status){ els.status.textContent='Reconnaissance vocale : indis
 
 function start(){
   if(!canSTT){ alert('La reconnaissance vocale n’est pas disponible ici. Essayez Chrome ou Edge.'); return; }
+  manuallyStopped = false;
+  wantListening = true;
+
   var Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new Rec();
   recognition.lang='fr-FR';
@@ -211,7 +236,19 @@ function start(){
 
   recognition.onstart=function(){ running=true; if (els.status) els.status.textContent='Reconnaissance vocale : écoute en cours…'; };
   recognition.onerror=function(){ if (els.status) els.status.textContent='Reconnaissance vocale : erreur'; };
-  recognition.onend=function(){ running=false; if (els.status) els.status.textContent='Reconnaissance vocale : arrêtée'; stopLoop(); };
+  recognition.onend=function(){
+    running=false;
+    if (els.status) els.status.textContent='Reconnaissance vocale : arrêtée';
+    stopLoop();
+    // Si l’arrêt n’est pas volontaire et qu’on veut rester en écoute, relancer (sauf si TTS parle)
+    if (wantListening && !manuallyStopped){
+      if (!ttsSpeaking){
+        setTimeout(function(){ try{ recognition && recognition.start(); }catch(e){} }, 120);
+      } else {
+        // la TTS va relancer à la fin via u.onend
+      }
+    }
+  };
   recognition.onresult=function(e){
     var final='', interim='';
     for(var i=e.resultIndex; i<e.results.length; i++){
@@ -232,7 +269,8 @@ function start(){
   };
 
   if (els.text){ if (!els.text.dataset) els.text.dataset = {}; els.text.dataset.base=''; }
-  recognition.start();
+  try{ recognition.start(); }catch(e){}
+
   if (els.start) els.start.disabled=true;
   if (els.stop) els.stop.disabled=false;
 
@@ -243,10 +281,16 @@ function start(){
   }, 250);
 
   startLoop();
-  if (els.coachOn && els.coachOn.checked) speak("Parfait. Je suis prêt quand vous l’êtes.", Number(els.rate && els.rate.value));
+
+  // IMPORTANT: plus de TTS automatique au démarrage (texte uniquement)
+  if (els.coachOn && els.coachOn.checked) {
+    if (els.coachText) els.coachText.textContent = "Parfait. Je suis prêt quand vous l’êtes.";
+  }
 }
 
 function stop(){
+  manuallyStopped = true;
+  wantListening = false;
   try{ recognition && recognition.stop(); }catch(e){}
   if (els.start) els.start.disabled=false;
   if (els.stop) els.stop.disabled=true;
@@ -258,32 +302,32 @@ function stop(){
 function ttsPrompt(){
   var txt = (els.prompt && els.prompt.textContent) ? els.prompt.textContent.trim() : '';
   if (!txt) return;
-  try{
-    var u = new SpeechSynthesisUtterance(txt);
-    u.lang='fr-FR'; u.rate = Number(els.rate && els.rate.value) || 1.0; speechSynthesis.speak(u);
-  }catch(e){}
+  speak(txt, Number(els.rate && els.rate.value) || 1.0);
 }
 
 function startLoop(){
   stopLoop();
   loop = setInterval(function(){
-    if (!(els.coachOn && els.coachOn.checked) || !running) return;
+    if (!(els.coachOn && els.coachOn.checked) || !wantListening) return;
     var now = Date.now();
     var silenceVal = Number(els.silence && els.silence.value) || 5;
     if (silenceVal < 3) silenceVal = 3;
     if (silenceVal > 15) silenceVal = 15;
     var silenceMs = silenceVal * 1000;
 
-    if (!askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil){
+    // pas de relance pendant que la TTS parle
+    if (ttsSpeaking) return;
+
+    if (!askedRecently && running && (now - lastChange) >= silenceMs && now > cooldownUntil){
       var lvl = (current && current.prompt && current.prompt.lvl) ? current.prompt.lvl : (els.level ? els.level.value : 'B1');
       var cat = (current && current.prompt && current.prompt.cat) ? current.prompt.cat : (els.category ? els.category.value : 'Small talk');
       var transcript = (els.text && els.text.value) ? els.text.value : '';
       var q = pickFollowUp(cat || 'Small talk', lvl || 'B1', transcript);
       speak(q, Number(els.rate && els.rate.value));
       askedRecently = true;
-      cooldownUntil = now + 2500; // éviter l’écho TTS
+      cooldownUntil = now + 1200; // courte fenêtre anti-echo
     }
-  }, 500);
+  }, 400);
 }
 function stopLoop(){ if (loop){ clearInterval(loop); loop=null; } }
 
@@ -307,5 +351,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
+
 </body>
 </html>
