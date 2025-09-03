@@ -72,7 +72,7 @@
     <div class="row">
       <label><input type="checkbox" id="coachOn" checked> Mode Coach</label>
       <label>Relance après silence (s)</label>
-      <!-- default set to 10s now -->
+      <!-- Default 10s -->
       <input type="number" id="silence" min="3" max="15" step="1" value="10" style="width:64px">
       <span class="hint">Le coach posera une nouvelle question ~<b>10 s</b> après votre arrêt de parole.</span>
     </div>
@@ -86,7 +86,7 @@
 
 <script>
 /* =========================
-   Parle+ Mini — Script FR (Brave Android stable, 10s follow-ups)
+   Parle+ Mini — Script FR (Brave Android follow-ups stable)
    ========================= */
 
 /* --- Banque de sujets (A1 → C1) --- */
@@ -342,16 +342,17 @@ function startLoop(){
   stopLoop();
   loop = setInterval(function(){
     if (!(els.coachOn && els.coachOn.checked) || !wantListening) return;
+
     var now = Date.now();
-    // default fallback 10s if field missing/empty
-    var silenceVal = Number(els.silence && els.silence.value) || 10;
+    var silenceVal = Number(els.silence && els.silence.value) || 10; // fallback 10s
     if (silenceVal < 3) silenceVal = 3;
     if (silenceVal > 15) silenceVal = 15;
     var silenceMs = silenceVal * 1000;
 
     if (ttsSpeaking) return; // pas de relance pendant la TTS
 
-    if (!heardAnything && running && (now - lastChange) >= 8000) {
+    /* --- NUDGE: si rien entendu après 8s (ne dépend PAS de `running`) --- */
+    if (!heardAnything && (now - lastChange) >= 8000 && !ttsSpeaking) {
       pauseMicForTTS();
       speak("Je ne vous entends pas encore. Commencez quand vous voulez : une ou deux phrases suffisent.", Number(els.rate && els.rate.value));
       heardAnything = true;
@@ -359,14 +360,14 @@ function startLoop(){
       return;
     }
 
-    if (heardAnything && running && !askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil){
+    /* --- FOLLOW-UP normal (ne dépend PAS de `running`) --- */
+    if (heardAnything && !askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil && !ttsSpeaking){
       var lvl = (current && current.prompt && current.prompt.lvl) ? current.prompt.lvl : (els.level ? els.level.value : 'B1');
       var cat = (current && current.prompt && current.prompt.cat) ? current.prompt.cat : (els.category ? els.category.value : 'Small talk');
       var transcript = (els.text && els.text.value) ? els.text.value : '';
       var q = pickFollowUp(cat || 'Small talk', lvl || 'B1', transcript);
 
-      // Pause mic so TTS is audible; auto-resume on TTS end
-      pauseMicForTTS();
+      pauseMicForTTS(); // pour être sûr d'entendre la relance
 
       if (!window.__firstFollowUpDone) {
         window.__firstFollowUpDone = true;
@@ -376,17 +377,25 @@ function startLoop(){
       }
 
       askedRecently = true;
-      // slightly longer cooldown so TTS doesn't affect silence timer
-      cooldownUntil = now + 1800;
+      cooldownUntil = now + 1800; // TTS ne doit pas être comptée comme parole
     }
   }, 400);
 }
 function stopLoop(){ if (loop){ clearInterval(loop); loop=null; } }
 
-/* --- Watchdog : relance auto si l’écoute saute (Brave/Android) --- */
+/* --- Watchdog : relance auto (mais pas si une relance est due) --- */
 function startWatchdog(){
   stopWatchdog();
   watchdog = setInterval(function(){
+    var silenceVal = Number(els.silence && els.silence.value) || 10;
+    if (silenceVal < 3) silenceVal = 3;
+    if (silenceVal > 15) silenceVal = 15;
+    var silenceMs = silenceVal * 1000;
+    var dueFollowUp = heardAnything && !askedRecently && (Date.now() - lastChange) >= silenceMs && Date.now() > cooldownUntil;
+
+    // si une relance est due maintenant, ne pas relancer le micro : la TTS doit parler
+    if (dueFollowUp) return;
+
     if (wantListening && !running && !ttsSpeaking && !manuallyStopped){
       if (!restarting) {
         restarting = true;
