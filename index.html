@@ -269,6 +269,9 @@ function start(){
       else interim+=r[0].transcript;
     }
 
+     // Ignore recognition results while TTS is speaking
+    if (ttsSpeaking) return;
+
     // a-t-on entendu au moins 3 mots (interim ou final) ?
     var lastChunk = (final || interim || '').trim();
     if (lastChunk.split(/\s+/).filter(Boolean).length >= 3) { heardAnything = true; }
