@@ -207,7 +207,24 @@ function pick(){
   });
   var p = pool.length ? pool[Math.floor(Math.random()*pool.length)] : PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
   current.prompt = p;
+
   if (els.prompt) els.prompt.textContent = p.t;
+
+  // Speak the prompt aloud ALWAYS
+  var rate = Number(els.rate && els.rate.value) || 1.0;
+
+  // Brief cooldown so TTS doesn’t trigger silence follow-up or contaminate transcript
+  cooldownUntil = Date.now() + 1500;
+
+  // Show a short “I’m listening” text, but use real TTS for the prompt itself
+  if (els.coachOn && els.coachOn.checked && els.coachText){
+    els.coachText.textContent = "Très bien. J’énonce le sujet, puis je vous écoute.";
+  }
+
+  // This calls TTS; our speak() already auto-resumes the mic on Android after TTS finishes
+  speak(p.t, rate);
+}
+
 
   // texte d’amorce uniquement (pas de TTS) pour ne pas couper le micro
   if (els.coachOn && els.coachOn.checked && els.coachText){
