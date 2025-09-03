@@ -86,7 +86,7 @@
 
 <script>
 /* =========================
-   Parle+ Mini — Script FR (Brave Android follow-ups stable)
+   Parle+ Mini — Script FR (Brave Android: follow-ups stable)
    ========================= */
 
 /* --- Banque de sujets (A1 → C1) --- */
@@ -149,6 +149,7 @@ var watchdog = null;
 var restarting = false;          // évite doubles start()
 var lastCoach = "Très bien. Je vous écoute.";
 var cooldownUntil = 0;           // pause courte après certaines TTS
+var micStoppedAt = 0;            // dernier arrêt du micro (ms)
 window.__firstFollowUpDone = false;
 
 /* --- TTS avec auto-resume et garde double-start --- */
@@ -271,6 +272,7 @@ function start(){
   };
   recognition.onend=function(){
     running=false;
+    micStoppedAt = Date.now();   // <-- timestamp d'arrêt du micro
     var st = document.getElementById('status');
     if (st) st.textContent='Reconnaissance vocale : arrêtée';
     stopLoop();
@@ -284,7 +286,7 @@ function start(){
       else interim+=r[0].transcript;
     }
 
-    /* Ignorer ce que dit la TTS pour ne pas polluer la transcription */
+    /* Ignorer la TTS (ne pas transcrire ce que l’app dit) */
     if (ttsSpeaking) return;
 
     var lastChunk = (final || interim || '').trim();
@@ -301,6 +303,12 @@ function start(){
       els.text.value = base + final + '\n' + interim;
       if (Date.now() > cooldownUntil) { lastChange = Date.now(); askedRecently=false; }
     }
+  };
+
+  /* --- NEW: marquer la parole dès le début (Android) --- */
+  recognition.onspeechstart = function(){
+    heardAnything = true;
+    lastChange = Date.now();
   };
 
   if (els.text){ if (!els.text.dataset) els.text.dataset = {}; els.text.dataset.base=''; }
@@ -383,7 +391,7 @@ function startLoop(){
 }
 function stopLoop(){ if (loop){ clearInterval(loop); loop=null; } }
 
-/* --- Watchdog : relance auto (mais pas si une relance est due) --- */
+/* --- Watchdog : relance auto (mais pas si une relance est due; + délai post-stop) --- */
 function startWatchdog(){
   stopWatchdog();
   watchdog = setInterval(function(){
@@ -391,10 +399,15 @@ function startWatchdog(){
     if (silenceVal < 3) silenceVal = 3;
     if (silenceVal > 15) silenceVal = 15;
     var silenceMs = silenceVal * 1000;
-    var dueFollowUp = heardAnything && !askedRecently && (Date.now() - lastChange) >= silenceMs && Date.now() > cooldownUntil;
 
-    // si une relance est due maintenant, ne pas relancer le micro : la TTS doit parler
+    var now = Date.now();
+    var dueFollowUp = heardAnything && !askedRecently && (now - lastChange) >= silenceMs && now > cooldownUntil;
+
+    // ① si une relance est due, ne pas rallumer le micro : laisser la TTS parler
     if (dueFollowUp) return;
+
+    // ② attendre 1.5s après tout arrêt micro pour éviter le thrash
+    if (now - micStoppedAt < 1500) return;
 
     if (wantListening && !running && !ttsSpeaking && !manuallyStopped){
       if (!restarting) {
