@@ -72,8 +72,9 @@
     <div class="row">
       <label><input type="checkbox" id="coachOn" checked> Mode Coach</label>
       <label>Relance après silence (s)</label>
-      <input type="number" id="silence" min="3" max="15" step="1" value="5" style="width:64px">
-      <span class="hint">Le coach posera une nouvelle question ~<b>5 s</b> après votre arrêt de parole.</span>
+      <!-- default set to 10s now -->
+      <input type="number" id="silence" min="3" max="15" step="1" value="10" style="width:64px">
+      <span class="hint">Le coach posera une nouvelle question ~<b>10 s</b> après votre arrêt de parole.</span>
     </div>
     <div id="coach" class="coach">
       <div><b>Assistant :</b> <span id="coachText" class="q">J’énoncerai le sujet puis je vous écouterai.</span></div>
@@ -85,7 +86,7 @@
 
 <script>
 /* =========================
-   Parle+ Mini — Script FR (Brave Android stable)
+   Parle+ Mini — Script FR (Brave Android stable, 10s follow-ups)
    ========================= */
 
 /* --- Banque de sujets (A1 → C1) --- */
@@ -145,7 +146,7 @@ var ttsSpeaking   = false;
 var manuallyStopped = false;
 var heardAnything = false;
 var watchdog = null;
-var restarting = false;          // pour éviter les doubles start()
+var restarting = false;          // évite doubles start()
 var lastCoach = "Très bien. Je vous écoute.";
 var cooldownUntil = 0;           // pause courte après certaines TTS
 window.__firstFollowUpDone = false;
@@ -183,6 +184,14 @@ function speak(text, rate){
 }
 function repeat(rate){ speak(lastCoach, rate); }
 
+/* --- Pause mic avant TTS (pour que la relance soit entendue) --- */
+function pauseMicForTTS(){
+  try {
+    if (recognition && running) { recognition.stop(); }
+  } catch(e) {}
+  running = false;
+}
+
 /* --- Références UI --- */
 var els = {
   level: document.getElementById('level'),
@@ -219,11 +228,9 @@ function pick(){
   if (els.prompt) els.prompt.textContent = p.t;
 
   cooldownUntil = Date.now() + 1500; // éviter relance/prise de son pendant lecture du sujet
-
   if (els.coachOn && els.coachOn.checked && els.coachText){
     els.coachText.textContent = "Très bien. J’énonce le sujet, puis je vous écoute.";
   }
-
   var rate = Number(els.rate && els.rate.value) || 1.0;
   speak(p.t, rate);
 }
@@ -336,7 +343,8 @@ function startLoop(){
   loop = setInterval(function(){
     if (!(els.coachOn && els.coachOn.checked) || !wantListening) return;
     var now = Date.now();
-    var silenceVal = Number(els.silence && els.silence.value) || 5;
+    // default fallback 10s if field missing/empty
+    var silenceVal = Number(els.silence && els.silence.value) || 10;
     if (silenceVal < 3) silenceVal = 3;
     if (silenceVal > 15) silenceVal = 15;
     var silenceMs = silenceVal * 1000;
@@ -344,6 +352,7 @@ function startLoop(){
     if (ttsSpeaking) return; // pas de relance pendant la TTS
 
     if (!heardAnything && running && (now - lastChange) >= 8000) {
+      pauseMicForTTS();
       speak("Je ne vous entends pas encore. Commencez quand vous voulez : une ou deux phrases suffisent.", Number(els.rate && els.rate.value));
       heardAnything = true;
       lastChange = Date.now();
@@ -356,6 +365,9 @@ function startLoop(){
       var transcript = (els.text && els.text.value) ? els.text.value : '';
       var q = pickFollowUp(cat || 'Small talk', lvl || 'B1', transcript);
 
+      // Pause mic so TTS is audible; auto-resume on TTS end
+      pauseMicForTTS();
+
       if (!window.__firstFollowUpDone) {
         window.__firstFollowUpDone = true;
         setTimeout(function(){ speak(q, Number(els.rate && els.rate.value)); }, 800);
@@ -364,7 +376,8 @@ function startLoop(){
       }
 
       askedRecently = true;
-      cooldownUntil = now + 1200; // petite fenêtre pour éviter l’écho
+      // slightly longer cooldown so TTS doesn't affect silence timer
+      cooldownUntil = now + 1800;
     }
   }, 400);
 }
@@ -406,6 +419,7 @@ function pickFollowUp(category, lvl, transcript){
 function ttsPrompt(){
   var txt = (els.prompt && els.prompt.textContent) ? els.prompt.textContent.trim() : '';
   if (!txt) return;
+  pauseMicForTTS();
   speak(txt, Number(els.rate && els.rate.value) || 1.0);
 }
 
